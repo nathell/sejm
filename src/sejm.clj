@@ -112,3 +112,42 @@ a truthy value. Returns a lazy seq of partitions."
             (log "Unable to download data for %s" (pr-str g)))))
       input-data))))
   
+;; one row per MP 
+
+(def vote-encoding
+  {"Za" 1,
+   "Przeciw" 2,
+   "Wstrzymał się" 3,
+   "Nieobecny" 4,
+   "Nie oddał głosu" 5})
+
+(defn as-int [x]
+  (Integer/parseInt x))
+
+(defn load-voting-data [input]
+  (with-open [f (io/reader input)]
+    (reduce
+     (fn [acc [kadencja posiedzenie glosowanie klub posel glos]]
+       (assoc-in acc [posel [(as-int kadencja) (as-int posiedzenie) (as-int glosowanie)]] (vote-encoding glos)))
+     {}
+     (csv/parse-csv f))))
+
+(defn emit-csv 
+  [^java.io.Writer w table & {:keys [delimiter quote-char end-of-line force-quote]
+                              :or {delimiter \, quote-char \" end-of-line "\n"
+                                   force-quote false}}]
+  (doseq [row table]
+    (.write w (#'csv/quote-and-escape-row row
+                                          (str delimiter)
+                                          quote-char
+                                          force-quote))
+    (.write w "\n")))
+
+(defn save-horizontal [outfile data]
+  (let [glosowania (sort (distinct (apply concat (map keys (vals data)))))
+        header (into ["posel"] (map (fn [[a b c]] (format "v%d_%03d_%03d" a b c)) glosowania))]
+    (with-open [f (io/writer outfile)]
+      (emit-csv f
+                (into [header]
+                      (for [[posel glosy] (sort-by key data)]
+                        (into [posel] (map (comp str glosy) glosowania))))))))
